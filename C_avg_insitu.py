@@ -115,15 +115,11 @@ class extract_data(object):
     
     def return_Cavg_simple_ringdown(self, filename, savefolder, save = True):
         '''
-        Calls simple_ringdown and loop_ringdown functions and collates both (simple and loop ringdowns) of the C-avg-ed data in an array. 
+        Calls simple_ringdown collates averaged data in an array. 
         This array is supplemented with relevant headers and saved.
         '''
 
-        # tempS = self.simple_ringdown()
-        
-        # temptot = np.stack((tempS[:,0], tempS[:,1], tempS[:,2], tempS[:,3], tempS[:,4], tempS[:,5]),axis = -1)
-        if hasattr(self, 'time_avg') == False:
-            self.simple_ringdown()
+        self.simple_ringdown()
         
         save_data = np.real(np.stack((self.time_avg, self.TTL_avg, self.C2abs, self.C2arg/(2*np.pi), self.C5avg, self.C5arg/(2*np.pi)),axis = -1))
         
@@ -149,7 +145,7 @@ class extract_data(object):
 
     def return_Cavg_interleaved_ringdown(self, filename, savefolder, save = True):
         '''
-        Calls simple_ringdown and loop_ringdown functions and collates both (simple and loop ringdowns) of the C-avg-ed data in an array. 
+        Calls interleaved_ringdown and interleaved_loop functions and collates both (simple and loop ringdowns) averaged data in an array. 
         This array is supplemented with relevant headers and saved.
         '''
 
@@ -324,7 +320,7 @@ class extract_data(object):
         '''
         Rigndown plots
         Since I'm not saving all the markers globally, I need to run interleaved_ringdown again
-        This isn't elegant, but in the grand scheme of things it's not a big deal
+        This isn't elegant, but in terms of runtime calling the averager isn't the limiting factor
         Also, we were already doing this anyways
         '''
         self.interleaved_ringdown()
@@ -334,11 +330,7 @@ class extract_data(object):
         self.tprependS = self.tprepstartS + self.setpreptime # end of the prep period
         self.tloopendS = self.tprependS + 0 # No loop here
         self.tLIAendS = self.tloopendS + self.tLIA # End Marker for lockin wait window
-        
 
-
-        # number of neuron plots, i.e. number of constituents in the average
-        elements = np.shape(self.C5stack)[1]
         # number of neuron plots, i.e. number of constituents in the average
         elements = np.shape(self.C5stack)[1]
 
@@ -414,7 +406,8 @@ class extract_data(object):
         '''
         Loop plots
         Since I'm not saving all the markers globally, I need to run interleaved_loop again
-        This isn't elegant, but in the grand scheme of things it's not a big deal
+        This isn't elegant, but in terms of runtime calling the averager isn't the limiting factor
+        Also, we were doing this anyways
         '''
 
         self.interleaved_loop()
@@ -425,7 +418,6 @@ class extract_data(object):
         self.tprependS = self.tprepstartS + self.setpreptime # end of the prep period
         self.tloopendS = self.tprependS + self.setlooptime # end of the loop period
         self.tLIAendS = self.tloopendS + self.tLIA # End Marker for lockin wait window
-
 
         # number of neuron plots, i.e. number of constituents in the average
         elements = np.shape(self.C5stack)[1]
@@ -450,7 +442,6 @@ class extract_data(object):
         ax2.minorticks_off()
         ax2.margins(0.025, 0.05)
         
-
         #demod 2 arg loop ringdown
         ax3 = f.add_subplot(gs01[1], sharex=ax2)
         ax3.tick_params(axis='both', which='major', direction='in', labelsize=fsz, size=3, width=wid, top='on', pad = 5, right='on')
@@ -467,9 +458,6 @@ class extract_data(object):
         ax3.set_ylabel("Arg[response] (2$\pi$)", labelpad=8, fontsize = fsz+2)
         ax3.set_xlabel("time (s)", labelpad=8, fontsize = fsz+2)
         ax3.margins(0.025, 0.05)
-        
-        
-        
         
         gs03 = gridspec.GridSpecFromSubplotSpec(2, 1, subplot_spec=gs0[1:, -1], hspace=0)
         #demod 5 abs loop ringdown
