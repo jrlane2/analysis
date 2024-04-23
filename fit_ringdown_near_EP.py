@@ -233,10 +233,15 @@ class guess_loader(object):
     def __init__(self, filename):
         self.guesses  = np.loadtxt(filename)[:,0:7]
         self.f1g, self.f2g, self.gam1g, self.gam2g, self.eta, self.bf1, self.bf2 = self.guesses[:,0], self.guesses[:,1], self.guesses[:,2], self.guesses[:,3], self.guesses[:,4], self.guesses[:,5], self.guesses[:,6]
+        # f_i is the lab frame eigenvalue, except it's boosted up bu (bf1 + bf2)/2 for some reason
+        # Everything is in Hz... except gamma_i, which is in rad/s
+        # this function loadss the guesses as they are in the file into an object
         self.times = np.loadtxt(filename)[:,9]
         return 
     def ith_guess(self, i):
-        self.init_guess = [self.f1g[i], self.f2g[i], self.gam1g[i], self.gam2g[i], self.bf1[i], self.bf2[i], self.eta[i]]
+        # This function returns a guess for a single run, more amenable to the fitting routine
+        bfbar = (self.bf1[i] + self.bf2[i])/2
+        self.init_guess = [self.f1g[i] - bfbar, self.f2g[i] - bfbar, self.gam1g[i]/(2*np.pi), self.gam2g[i]/(2*np.pi), self.bf1[i], self.bf2[i], self.eta[i]]
         return self.init_guess
 
     def plot_bare(self, plot = False):
@@ -356,13 +361,13 @@ def make_id(idtab):
     return sortedtab
 
 
-def load_tap(foldertap, itap):
+def load_tap(filetap):
     '''
     to load taps
     '''
 
     #import relevant tap csv file
-    tapdata = np.loadtxt(foldertap + "summary of ringdown_{}.csv".format(itap))
+    tapdata = np.loadtxt(filetap)
     #distribute values
     eta = tapdata[0,6]
 
@@ -470,7 +475,7 @@ def mode_one_prep_two_demod_response(t, A, B, C, phiA, phiB, phiC, w1, w2, fbar,
     osc1demod2 = single_osc_demod_response(t, A, phiA, 2*np.pi*(w1 + fbar + df/2), 2*np.pi*(gammabar + dgamma/2), demodf2, tau)
     osc2demod2 = single_osc_demod_response(t, B, phiB, 2*np.pi*(w1 + fbar + df/2), 2*np.pi*(gammabar - dgamma/2), demodf2, tau)
 
-    # Osicllators at denod 5
+    # Osicllators at demod 5
 
     osc1demod5 = single_osc_demod_response(t, C, phiC, 2*np.pi*(w2 + fbar - df/2), 2*np.pi*(gammabar + dgamma/2), demodf5, tau)
     osc2demod5 = -1*single_osc_demod_response(t, C, phiC, 2*np.pi*(w2 + fbar - df/2), 2*np.pi*(gammabar - dgamma/2), demodf5, tau)
@@ -486,32 +491,58 @@ def mode_one_prep_two_demod_response(t, A, B, C, phiA, phiB, phiC, w1, w2, fbar,
 
 mode_one_prep_two_demod_response_model = lmfit.Model(mode_one_prep_two_demod_response, independent_vars=['t'])
 
-# def two_prep_two_demod_response(t_1, t_2, A, C_1, C_2, D, phiA, phiC_1, phiC_2, phiD_1, phiD_2, w1_1, w2_1, w1_2, w2_2, gammabar, dgamma, 
-#                                fbar, df, demodf1, demodf2, tau, bkgR_1, bkgI_1, bkgR_2, bkgI_2, scaleR_1, scaleI_1, scaleR_2, scaleI_2):
-#     '''
-#     Units same as: single_osc_demod_response()
-#     This is for *two* separate preparations, where I'm fitting a single demod per preparation
-#     the preperation index is given after the underscore, i.e. varibles related to experiment 1 are given by _1 and vice verse
-#     Shared between the two preparations are the shift frequencies, decay rates, demod frequencies and time constant
-#     '''
-#     # prep 1
-#     osc1demod_1 = single_osc_demod_response(t_1, A1_1, phi1_1, 2*np.pi*w1_1 + 2*np.pi*dw1, 2*np.pi*gam1, demodf1, tau)
-#     osc2demod_1 = single_osc_demod_response(t_1, A2_1, phi2_1, 2*np.pi*w2_1 + 2*np.pi*dw2, 2*np.pi*gam2, demodf1, tau)
+def two_prep_two_demod_response(t_1, t_2, L1, L2, K1, K2, phiL1, phiL2, phiK1, phiK2, phiKrel, w1_1, w2_1, w1_2, w2_2, gammabar, dgamma, 
+                               fbar, df, demodf1_1, demodf2_1, demodf1_2, demodf2_2, tau, bkgR1_1, bkgI1_1, bkgR2_1, bkgI2_1, 
+                               bkgR1_2, bkgI1_2, bkgR2_2, bkgI2_2): # , scaleR_1, scaleI_1, scaleR_2, scaleI_2): remove scales for now
+    '''
+    Units same as: single_osc_demod_response()
+    This is for *two* separate preparations, where I'm fitting both demods in each experiment
+    the preperation index is given after the underscore, i.e. varibles related to experiment 1 are given by _1 and vice verse
+    Shared between the two preparations are the shift frequencies, decay rates, demod frequencies and time constant.
+    This assumes we're initializing in (1,0) and (0,1), respectively
+    '''
 
-#     # prep 2
-#     osc1demod_2 = single_osc_demod_response(t_2, A1_2, phi1_2, 2*np.pi*w1_2 + 2*np.pi*dw1, 2*np.pi*gam1, demodf2, tau)
-#     osc2demod_2 = single_osc_demod_response(t_2, A2_2, phi2_2, 2*np.pi*w2_2 + 2*np.pi*dw2, 2*np.pi*gam2, demodf2, tau)
+    # Prepare amplitudes
+    L1c = L1*np.exp(1j*phiL1)
+    L2c = L2*np.exp(1j*phiL2)
+    K1c = K1*np.exp(1j*phiK1)
+    K2c = K2*np.exp(1j*phiK2)
+    A1 = -L1c*K2c/K1c
+    B1 = L1c
+    C1 = L2c*K2c
+    A2 = L2c/K1c*np.exp(1j*phiKrel) # account for misalignment of the demods between the two measurmement
+    B2 = L2c
+    C2 = -L2c*K2c/K1c
 
 
-#     initmodel_1 = osc1demod_1 + osc2demod_1 + bkgR_1 + 1j*bkgI_1
-#     initmodel_2 = osc1demod_2 + osc2demod_2 + bkgR_2 + 1j*bkgI_2
+    # prep 1, individual ringing decays
+    osc1demod1_1 = single_osc_demod_response2(t_1, A1.real, A1.imag, 2*np.pi*w1_1 + 2*np.pi*(fbar + df/2), 2*np.pi*(gammabar + dgamma/2), demodf1_1, tau)
+    osc2demod1_1 = single_osc_demod_response2(t_1, B1.real, B1.imag, 2*np.pi*w2_1 + 2*np.pi*(fbar - df/2), 2*np.pi*(gammabar - dgamma/2), demodf1_1, tau)
 
-#     model1 = (np.real(initmodel_1)/scaleR_1) + 1j*(np.imag(initmodel_1)/scaleI_1)
-#     model2 = (np.real(initmodel_2)/scaleR_2) + 1j*(np.imag(initmodel_2)/scaleI_2)
+    osc1demod2_1 = single_osc_demod_response2(t_1, C1.real, C1.imag, 2*np.pi*w1_2 + 2*np.pi*(fbar + df/2), 2*np.pi*(gammabar + dgamma/2), demodf2_1, tau)
+    osc2demod2_1 = -single_osc_demod_response2(t_1, C1.real, C1.imag, 2*np.pi*w2_2 + 2*np.pi*(fbar - df/2), 2*np.pi*(gammabar - dgamma/2), demodf2_1, tau)
+
+    # prep 2, individual ringing decays
+    osc1demod1_2 = single_osc_demod_response2(t_2, A2.real, A2.imag, 2*np.pi*w1_2 + 2*np.pi*(fbar + df/2), 2*np.pi*(gammabar + dgamma/2), demodf2_2, tau)
+    osc2demod1_2 = -single_osc_demod_response2(t_2, A2.real, A2.imag, 2*np.pi*w2_2 + 2*np.pi*(fbar - df/2), 2*np.pi*(gammabar - dgamma/2), demodf2_2, tau)
+
+    osc1demod2_2 = single_osc_demod_response2(t_2, B2.real, B2.imag, 2*np.pi*w1_1 + 2*np.pi*(fbar + df/2), 2*np.pi*(gammabar + dgamma/2), demodf1_2, tau)
+    osc2demod2_2 = single_osc_demod_response2(t_2, C2.real, C2.imag, 2*np.pi*w2_1 + 2*np.pi*(fbar - df/2), 2*np.pi*(gammabar - dgamma/2), demodf1_2, tau)
+
+    # prep 1, full response from each demod
+    model1_1 = osc1demod1_1 + osc2demod1_1 + bkgR1_1 + 1j*bkgI1_1
+    model1_2 = osc1demod2_1 + osc2demod2_1 + bkgR2_1 + 1j*bkgI2_1
+
+    # prep 2, full response from each demod
+    model2_1 = osc1demod1_2 + osc2demod1_2 + bkgR1_2 + 1j*bkgI1_2
+    model2_2 = osc1demod2_2 + osc2demod2_2 + bkgR2_2 + 1j*bkgI2_2
+
+    # model1 = (np.real(initmodel_1)/scaleR_1) + 1j*(np.imag(initmodel_1)/scaleI_1)
+    # model2 = (np.real(initmodel_2)/scaleR_2) + 1j*(np.imag(initmodel_2)/scaleI_2)
     
-#     return np.concatenate([model1, model2])
+    return np.concatenate([model1_1, model1_2, model2_1, model2_2])
 
-# two_prep_one_demod_response_model = lmfit.Model(two_prep_one_demod_response, independent_vars=['t_1', 't_2'])
+two_prep_two_demod_response_model = lmfit.Model(two_prep_two_demod_response, independent_vars=['t_1', 't_2'])
 
 
 '''
@@ -746,31 +777,6 @@ class fit_one():
         
         self.plotter = Plotter(self.exp1, None, [self.fit_t, self.fit_C2, self.fit_C5])
 
-        # #make theory curves
-        # if exp1.demod2f < exp2.demod2f:
-        #     # for experiment 1 (data from file1a)
-        #     self.exp1_fit_t = np.linspace(exp1.time[exp1.iLIAend], exp1.time[-1], 500)
-        #     self.exp1_fit_C2 = two_osc_demod_response(self.exp1_fit_t - exp1.time[exp1.iLIAstart], A1s, A2s, phi1s, phi2s, self.w11, self.w21, gam1s, gam2s, 
-        #                                 dw1s, dw2s, exp1.demod2f, exp1.tauLIA, bkgR1s, bkgI1s, 1, 1)
-        #     # for experiment 2 (data from file1b)
-        #     self.exp2_fit_t = np.linspace(exp2.time[exp2.iLIAend], exp2.time[-1], 500)
-        #     self.exp2_fit_C2 = two_osc_demod_response(self.exp2_fit_t - exp2.time[exp2.iLIAstart], B1s, B2s, qhi1s, qhi2s, self.w12, self.w22, gam1s, gam2s, 
-        #                                 dw1s, dw2s, exp2.demod2f, exp1.tauLIA, bkgR2s, bkgI2s, 1, 1)
-            
-        #     self.plotter = Plotter(self.exp1, self.exp2, [self.exp1_fit_t, self.exp1_fit_C2, self.exp2_fit_t, self.exp2_fit_C2])
-
-        # elif exp1.demod2f > exp2.demod2f:
-        #     # for experiment 2 (data from file1b)
-        #     self.exp1_fit_t = np.linspace(exp2.time[exp2.iLIAend], exp2.time[-1], 500)
-        #     self.exp1_fit_C2 = two_osc_demod_response(self.exp1_fit_t - exp2.time[exp2.iLIAstart], A1s, A2s, phi1s, phi2s, self.w11, self.w21,  gam1s, gam2s,
-        #                                 dw1s, dw2s,  exp2.demod2f, exp2.tauLIA, bkgR1s, bkgI1s, 1, 1)
-        #     # for experiment 1 (data from file1a)
-        #     self.exp2_fit_t = np.linspace(exp1.time[exp1.iLIAend], exp1.time[-1], 500)
-        #     self.exp2_fit_C2 = two_osc_demod_response(self.exp2_fit_t - exp1.time[exp1.iLIAstart], B1s, B2s, qhi1s, qhi2s, self.w12, self.w22, gam1s, gam2s, 
-        #                                 dw1s, dw2s, exp1.demod2f, exp1.tauLIA, bkgR2s, bkgI2s, 1, 1)
-            
-        #     self.plotter = Plotter(self.exp2, self.exp1, [self.exp1_fit_t, self.exp1_fit_C2, self.exp2_fit_t, self.exp2_fit_C2])
-
         self.fit_report = FRs
 
         self.return_array = np.array([exp1.demod2f, exp1.demod5f, fbars + dfs/2, fbars - dfs/2, gammabars + dgammas/2, gammabars - dgammas/2, 
@@ -802,13 +808,18 @@ class fit_all():
 
         shift is a "cluge" to escape non-linear ringdowns. Given separately for demod 2 and demod 5, in units ms
 
-        #scaleop is for putting both mode data at same footing.
+        #scaleop is for putting both mode data at same footing. I'm going to comment it out for now, we can add id back
+        in if it turns out to be necessary 
 
         '''
         
-        #load dynamics data: file1a, mode 1
+        #load dynamics, and make sure exp1 is when you're driving at the lower frequency mode
         exp1 = load_data(file1a)
-        exp2 = load_data(file1b)
+        if exp1.demod2f < exp1.demod5f:
+            exp2 = load_data(file1b)
+        else:
+            exp2 = load_data(file1a)
+            exp1 = load_data(file1b)
 
 
         exp1.tLIA = exp1.tLIA + shift[0]*1e-3 # Shift start time to escape non-linear ringdown 
@@ -826,16 +837,16 @@ class fit_all():
         #load guesses that are already compensated for drifts, in Hz units
         self.f1g, self.f2g, self.gam1g, self.gam2g, self.bf1, self.bf2, self.eta = initguess
 
-        self.w11 = (self.bf1 + self.eta/2)
-        self.w21 = (self.bf1 + self.eta/2) # near demod 1
-        self.w12 = (self.bf2 - self.eta/2) # near demod 2
-        self.w22 = (self.bf2 - self.eta/2)
+        self.w11 = (self.bf1 + self.eta/2) # near demod 2
+        self.w21 = (self.bf2 - self.eta/2) # near demod 5
+        self.w12 = (self.bf1 + self.eta/2) # same as w11
+        self.w22 = (self.bf2 - self.eta/2) # same as w22
 
         
-        self.scale1s = bool(scaleop == 0)*1 + bool(scaleop == 1)*1*max(np.abs(exp1.C2[exp1.iLIAend:-1]))
-        self.scale2s = self.scale1s
-        self.scale3s = bool(scaleop == 0)*1 + bool(scaleop == 1)*1*max(np.abs(exp2.C2[exp2.iLIAend:-1]))
-        self.scale4s = self.scale3s
+        # self.scale1s = bool(scaleop == 0)*1 + bool(scaleop == 1)*1*max(np.abs(exp1.C2[exp1.iLIAend:-1]))
+        # self.scale2s = self.scale1s
+        # self.scale3s = bool(scaleop == 0)*1 + bool(scaleop == 1)*1*max(np.abs(exp2.C2[exp2.iLIAend:-1]))
+        # self.scale4s = self.scale3s
         
         # I dont want to carry around all these selfs
         self.exp1 = exp1
@@ -843,7 +854,7 @@ class fit_all():
 
         return
     
-    def prepare_model(self, guess_array, modeorder, maxdev = 200):
+    def prepare_model(self, guess_array, maxdev = 200):
         '''
         Unpacks the guess array and prepares the model for fitting
 
@@ -858,7 +869,8 @@ class fit_all():
         exp1 = self.exp1
         exp2 = self.exp2
 
-        A1sg, A2sg, phi1sg, phi2sg, B1sg, B2sg, qhi1sg, qhi2sg, *backgrounds_eigenvalues = guess_array
+        # A1sg, A2sg, phi1sg, phi2sg, B1sg, B2sg, qhi1sg, qhi2sg, *backgrounds_eigenvalues = guess_array
+        L1g, L2g, K1g, K2g, phiL1g, phiL2g, phiK1g, phiK2g, phiKdiffg, *backgrounds_eigenvalues = guess_array
 
         model = two_prep_one_demod_response_model
 
@@ -869,58 +881,63 @@ class fit_all():
         model.set_param_hint('w2_2', value = self.w22, vary = False)
         model.set_param_hint('tau', value = exp1.tauLIA, vary = False)
 
-        if modeorder:
-            # set model parameters to the correct demod frequency and all the scalings correctly
-            model.set_param_hint('scaleR_1', value = self.scale1s, vary = False)
-            model.set_param_hint('scaleI_1', value = self.scale2s, vary = False)
-            model.set_param_hint('scaleR_2', value = self.scale3s, vary = False)
-            model.set_param_hint('scaleI_2', value = self.scale4s, vary = False)
+        model.set_param_hint('demodf1_1', value = exp1.demod2f, vary = False)
+        model.set_param_hint('demodf2_1', value = exp1.demod5f, vary = False)   
+        model.set_param_hint('demodf1_2', value = exp2.demod2f, vary = False)
+        model.set_param_hint('demodf2_2', value = exp2.demod5f, vary = False)
 
-            model.set_param_hint('demodf1', value = exp1.demod2f, vary = False)
-            model.set_param_hint('demodf2', value = exp2.demod2f, vary = False)            
-
-        else:
-            model.set_param_hint('scaleR_1', value = self.scale3s, vary = False)
-            model.set_param_hint('scaleI_1', value = self.scale4s, vary = False)
-            model.set_param_hint('scaleR_2', value = self.scale1s, vary = False)
-            model.set_param_hint('scaleI_2', value = self.scale2s, vary = False)
-
-            model.set_param_hint('demodf1', value = exp2.demod2f, vary = False)
-            model.set_param_hint('demodf2', value = exp1.demod2f, vary = False)
 
         # Provide intial guesses to variable parameters
-        model.set_param_hint('A1_1', value = A1sg)
-        model.set_param_hint('A2_1', value = A2sg)
-        model.set_param_hint('phi1_1', value = phi1sg)
-        model.set_param_hint('phi2_1', value = phi2sg)        
+        model.set_param_hint('L1', value = L1g)
+        model.set_param_hint('L2', value = L2g)
+        model.set_param_hint('phiL1', value = phiL1g)
+        model.set_param_hint('phiL2', value = phiL2g)
 
-        model.set_param_hint('A1_2', value = B1sg)
-        model.set_param_hint('A2_2', value = B2sg)
-        model.set_param_hint('phi1_2', value = qhi1sg)
-        model.set_param_hint('phi2_2', value = qhi2sg)
+        model.set_param_hint('K1', value = K1g)
+        model.set_param_hint('K2', value = K2g)
+        model.set_param_hint('phiK1', value = phiK1g)
+        model.set_param_hint('phiK2', value = phiK2g)
+        model.set_param_hint('phiKrel', value = phiKdiffg)
 
         if len(backgrounds_eigenvalues) == 0:
             # If we're fitting from scratch
-            model.set_param_hint('bkgR_1', value = 0)
-            model.set_param_hint('bkgI_1', value = 0)
-            model.set_param_hint('bkgR_2', value = 0)
-            model.set_param_hint('bkgI_2', value = 0)
-            model.set_param_hint('dw1', value = self.f1g, min = -maxdev + self.f1g, max = maxdev + self.f1g, vary = True)#200 Hz
-            model.set_param_hint('dw2', value = self.f2g, min = -maxdev + self.f2g, max = maxdev + self.f2g, vary = True)
-            model.set_param_hint('gam1', value = self.gam1g, min = -maxdev + self.gam1g, max = maxdev + self.gam1g, vary = True)
-            model.set_param_hint('gam2', value = self.gam2g, min = -maxdev + self.gam2g, max = maxdev + self.gam2g, vary = True)       
+            model.set_param_hint('bkgR1_1', value = 0)
+            model.set_param_hint('bkgI1_1', value = 0)
+            model.set_param_hint('bkgR2_1', value = 0)
+            model.set_param_hint('bkgI2_1', value = 0)
+            model.set_param_hint('bkgR1_2', value = 0)
+            model.set_param_hint('bkgI1_2', value = 0)
+            model.set_param_hint('bkgR2_2', value = 0)
+            model.set_param_hint('bkgI2_2', value = 0)
 
-        elif len(backgrounds_eigenvalues) == 8:
+            gambarg = (self.gam1g + self.gam2g)/2
+            dgamg = (self.gam2g - self.gam1g)
+            fbarg = (self.f1g + self.f2g)/2
+            dfg = (self.f2g - self.f1g)
+            model.set_param_hint('fbar', value = fbarg, min = -maxdev + fbarg, max = maxdev + fbarg, vary = True)#200 Hz
+            model.set_param_hint('df', value = dfg, min = -maxdev + dfg, max = maxdev + dfg, vary = True)
+            model.set_param_hint('gammabar', value = gambarg, min = -maxdev + gambarg, max = maxdev + gambarg, vary = True)
+            model.set_param_hint('gam2', value = dgamg, min = -maxdev + dgamg, max = maxdev + dgamg, vary = True)       
+
+        elif len(backgrounds_eigenvalues) == 12:
             # If we've already got a guess for the background and eigenvalues from a previous fit
-            bkgR1g, bkgI1g, bkgR2g, bkgI2g, f1sg, f2sg, g1sg, g2sg = backgrounds_eigenvalues
-            model.set_param_hint('bkgR_1', value = bkgR1g)
-            model.set_param_hint('bkgI_1', value = bkgI1g)
-            model.set_param_hint('bkgR_2', value = bkgR2g)
-            model.set_param_hint('bkgI_2', value = bkgI2g)
-            model.set_param_hint('dw1', value = f1sg, min = -maxdev + f1sg, max = maxdev + f1sg, vary = True)#200 Hz
-            model.set_param_hint('dw2', value = f2sg, min = -maxdev + f2sg, max = maxdev + f2sg, vary = True)
-            model.set_param_hint('gam1', value = g1sg, min = -maxdev + g1sg, max = maxdev + g1sg, vary = True)
-            model.set_param_hint('gam2', value = g2sg, min = -maxdev + g2sg, max = maxdev + g2sg, vary = True)
+            bkgR1_1g, bkgI1_1g, bkgR1_2g, bkgI1_2g, bkgR2_1g, bkgI2_1g, bkgR2_2g, bkgI2_2g = backgrounds_eigenvalues[:8]
+            fbarg, dfg, gambarg, dgamg = backgrounds_eigenvalues[8:]
+
+            model.set_param_hint('bkgR1_1', value = bkgR1_1g)
+            model.set_param_hint('bkgI1_1', value = bkgI1_1g)
+            model.set_param_hint('bkgR2_1', value = bkgR2_1g)
+            model.set_param_hint('bkgI2_1', value = bkgI2_1g)
+            model.set_param_hint('bkgR1_2', value = bkgR1_2g)
+            model.set_param_hint('bkgI1_2', value = bkgI1_2g)
+            model.set_param_hint('bkgR2_2', value = bkgR2_2g)
+            model.set_param_hint('bkgI2_2', value = bkgI2_2g)
+
+            model.set_param_hint('fbar', value = fbarg, min = -maxdev + fbarg, max = maxdev + fbarg, vary = True)#200 Hz
+            model.set_param_hint('df', value = dfg, min = -maxdev + dfg, max = maxdev + dfg, vary = True)
+            model.set_param_hint('gammabar', value = gambarg, min = -maxdev + gambarg, max = maxdev + gambarg, vary = True)
+            model.set_param_hint('gam2', value = dgamg, min = -maxdev + dgamg, max = maxdev + dgamg, vary = True)     
+
 
         else:
             print(backgrounds_eigenvalues)
@@ -937,25 +954,18 @@ class fit_all():
         exp2 = self.exp2
 
         # Prepare lmfit model
-        if exp1.demod2f < exp2.demod2f:
-            model= self.prepare_model(guesss, True, maxdev)
+        model= self.prepare_model(guesss, maxdev)
 
-            # Get the data into the right format
-            fitdat1 = (np.real(exp1.C2[exp1.iLIAend:-1])/self.scale1s) + 1j*(np.imag(exp1.C2[exp1.iLIAend:-1])/self.scale2s) # data from exp 1, lower frequency (3,3)
-            fitdat2 = (np.real(exp2.C2[exp2.iLIAend:-1])/self.scale3s) + 1j*(np.imag(exp2.C2[exp2.iLIAend:-1])/self.scale4s) # data from exp 2, higher frequency (5,3)
-            fitdat = np.concatenate([fitdat1, fitdat2])
-            t1axis = exp1.time[exp1.iLIAend:-1]-exp1.time[exp1.iLIAstart]
-            t2axis = exp2.time[exp2.iLIAend:-1]-exp2.time[exp2.iLIAstart]
-
-        else:
-            model= self.prepare_model(guesss, False, maxdev)
-
-            # Get the data into the right format
-            fitdat2 = (np.real(exp1.C2[exp1.iLIAend:-1])/self.scale1s) + 1j*(np.imag(exp1.C2[exp1.iLIAend:-1])/self.scale2s) # data from exp 1, higher frequency (5,3)
-            fitdat1 = (np.real(exp2.C2[exp2.iLIAend:-1])/self.scale3s) + 1j*(np.imag(exp2.C2[exp2.iLIAend:-1])/self.scale4s) # data from exp 2, lower frequency (3,3)
-            fitdat = np.concatenate([fitdat1, fitdat2])
-            t2axis = exp1.time[exp1.iLIAend:-1]-exp1.time[exp1.iLIAstart]
-            t1axis = exp2.time[exp2.iLIAend:-1]-exp2.time[exp2.iLIAstart]
+        # Get the data into the right format
+        # fitdat1 = (np.real(exp1.C2[exp1.iLIAend:-1])/self.scale1s) + 1j*(np.imag(exp1.C2[exp1.iLIAend:-1])/self.scale2s) # data from exp 1, lower frequency (3,3)
+        # fitdat2 = (np.real(exp2.C2[exp2.iLIAend:-1])/self.scale3s) + 1j*(np.imag(exp2.C2[exp2.iLIAend:-1])/self.scale4s) # data from exp 2, higher frequency (5,3)
+        fitdat1 = exp1.C2
+        fitdat2 = exp1.C5
+        fitdat3 = exp2.C2
+        fitdat4 = exp2.C5
+        fitdat = np.concatenate([fitdat1, fitdat2, fitdat3, fitdat4])
+        t1axis = exp1.time[exp1.iLIAend:-1]-exp1.time[exp1.iLIAstart]
+        t2axis = exp2.time[exp2.iLIAend:-1]-exp2.time[exp2.iLIAstart]
 
         # Fit the data formated above using the perapred model
         params = model.make_params()
