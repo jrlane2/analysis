@@ -28,8 +28,8 @@ import sys
 sys.path.append(sys.path[0].split('NewEP3Exp')[0] + 'NewEP3Exp/Code')
 sys.path.append(sys.path[0].split('NewEP3Exp')[0] + 'NewEP3Exp/Data/routine logs/calibration coefficients')
 import file_handling 
-import fitting.standard_fit_routines as fit
-import fitting.Rotating_frame_fit_routines as rotfit
+# import fitting.standard_fit_routines as fit
+# import fitting.Rotating_frame_fit_routines as rotfit
 import pickle
 import time
 import pandas as pd
@@ -98,7 +98,43 @@ def ift(array, t,):
     else:
         raise ValueError("tstamp is not a number or array of numbers")
 
+def unpack_FR(FR):
+    L1 = np.abs(FR.params['L1'].value)
+    L2 = np.abs(FR.params['L2'].value)
+    K1 = np.abs(FR.params['K1'].value)
+    K2 = np.abs(FR.params['K2'].value)
+    phiL1 = FR.params['phiL1'].value % (2*np.pi)
+    phiL2 = FR.params['phiL2'].value % (2*np.pi)
+    phiK1 = FR.params['phiK1'].value % (2*np.pi)
+    phiK2 = FR.params['phiK2'].value % (2*np.pi)
+    phiKrel = FR.params['phiKrel'].value % (2*np.pi)
 
+    bkgR1_1, bkgI1_1 = FR.params['bkgR1_1'].value, FR.params['bkgI1_1'].value
+    bkgR1_2, bkgI1_2 = FR.params['bkgR1_2'].value, FR.params['bkgI1_2'].value
+    bkgR2_1, bkgI2_1 = FR.params['bkgR2_1'].value, FR.params['bkgI2_1'].value
+    bkgR2_2, bkgI2_2 = FR.params['bkgR2_2'].value, FR.params['bkgI2_2'].value
+
+    fbar = FR.params['fbar'].value
+    df = FR.params['df'].value
+    gammabar = FR.params['gammabar'].value
+    dgamma = FR.params['dgamma'].value
+
+    return [L1, L2, K1, K2, phiL1, phiL2, phiK1, phiK2, phiKrel, bkgR1_1, bkgI1_1, 
+                bkgR1_2, bkgI1_2, bkgR2_1, bkgI2_1, bkgR2_2, bkgI2_2, fbar, df, gammabar, dgamma]
+
+def unpack_FR_return(FR):
+    # unpacks the fit report for saving in an array when we loop over this
+    header = ""
+    values = np.array([])
+    for i in FR.params:
+        header = header + i + ', '
+        if i == "L1" or i == "L2" or i == "K1" or i == "K2":
+            values = np.append(values, np.abs(FR.params[i].value))
+        elif i[:3] == "phi":
+            values = np.append(values, FR.params[i].value%(2*np.pi))
+        else:
+            values = np.append(values, FR.params[i].value)
+    return header, values
 
 '''
 file loaders, assemblers and savers
@@ -302,6 +338,7 @@ class load_data(object):
             
         #distribute data specs
         [self.demod2f, self.demod5f, setdrivetime, filterorder, BWLIA, self.tLIA, t_wait] = header1[[0,1,2,3,5,6,11]]
+        t_wait = 0 # bandage, since there's no loops and I just want T=0 to be when the drive turns off
         self.tauLIA = bw2tc(BWLIA, int(filterorder))
         self.setlooptime = 0
         
@@ -503,31 +540,33 @@ def two_prep_two_demod_response(t_1, t_2, L1, L2, K1, K2, phiL1, phiL2, phiK1, p
     '''
 
     # Prepare amplitudes
-    L1c = L1*np.exp(1j*phiL1)
-    L2c = L2*np.exp(1j*phiL2)
-    K1c = K1*np.exp(1j*phiK1)
-    K2c = K2*np.exp(1j*phiK2)
+    L1c = np.abs(L1)*np.exp(1j*phiL1)
+    L2c = np.abs(L2)*np.exp(1j*phiL2)
+    K1c = np.abs(K1)*np.exp(1j*phiK1)
+    K2c = np.abs(K2)*np.exp(1j*phiK2)
     A1 = -L1c*K2c/K1c
     B1 = L1c
-    C1 = L2c*K2c
+    C1 = -L1c*K2c
+    C1m = -C1
     A2 = L2c/K1c*np.exp(1j*phiKrel) # account for misalignment of the demods between the two measurmement
+    A2m = -A2
     B2 = L2c
     C2 = -L2c*K2c/K1c
 
-
     # prep 1, individual ringing decays
     osc1demod1_1 = single_osc_demod_response2(t_1, A1.real, A1.imag, 2*np.pi*w1_1 + 2*np.pi*(fbar + df/2), 2*np.pi*(gammabar + dgamma/2), demodf1_1, tau)
-    osc2demod1_1 = single_osc_demod_response2(t_1, B1.real, B1.imag, 2*np.pi*w2_1 + 2*np.pi*(fbar - df/2), 2*np.pi*(gammabar - dgamma/2), demodf1_1, tau)
+    osc2demod1_1 = single_osc_demod_response2(t_1, B1.real, B1.imag, 2*np.pi*w1_1 + 2*np.pi*(fbar - df/2), 2*np.pi*(gammabar - dgamma/2), demodf1_1, tau)
 
-    osc1demod2_1 = single_osc_demod_response2(t_1, C1.real, C1.imag, 2*np.pi*w1_2 + 2*np.pi*(fbar + df/2), 2*np.pi*(gammabar + dgamma/2), demodf2_1, tau)
-    osc2demod2_1 = -single_osc_demod_response2(t_1, C1.real, C1.imag, 2*np.pi*w2_2 + 2*np.pi*(fbar - df/2), 2*np.pi*(gammabar - dgamma/2), demodf2_1, tau)
+    osc1demod2_1 = single_osc_demod_response2(t_1, C1.real, C1.imag, 2*np.pi*w2_1 + 2*np.pi*(fbar + df/2), 2*np.pi*(gammabar + dgamma/2), demodf2_1, tau)
+    osc2demod2_1 = single_osc_demod_response2(t_1, C1m.real, C1m.imag, 2*np.pi*w2_1 + 2*np.pi*(fbar - df/2), 2*np.pi*(gammabar - dgamma/2), demodf2_1, tau)
 
     # prep 2, individual ringing decays
     osc1demod1_2 = single_osc_demod_response2(t_2, A2.real, A2.imag, 2*np.pi*w1_2 + 2*np.pi*(fbar + df/2), 2*np.pi*(gammabar + dgamma/2), demodf2_2, tau)
-    osc2demod1_2 = -single_osc_demod_response2(t_2, A2.real, A2.imag, 2*np.pi*w2_2 + 2*np.pi*(fbar - df/2), 2*np.pi*(gammabar - dgamma/2), demodf2_2, tau)
+    osc2demod1_2 = single_osc_demod_response2(t_2, A2m.real, A2m.imag, 2*np.pi*w1_2 + 2*np.pi*(fbar - df/2), 2*np.pi*(gammabar - dgamma/2), demodf2_2, tau)
 
-    osc1demod2_2 = single_osc_demod_response2(t_2, B2.real, B2.imag, 2*np.pi*w1_1 + 2*np.pi*(fbar + df/2), 2*np.pi*(gammabar + dgamma/2), demodf1_2, tau)
-    osc2demod2_2 = single_osc_demod_response2(t_2, C2.real, C2.imag, 2*np.pi*w2_1 + 2*np.pi*(fbar - df/2), 2*np.pi*(gammabar - dgamma/2), demodf1_2, tau)
+    osc1demod2_2 = single_osc_demod_response2(t_2, B2.real, B2.imag, 2*np.pi*w2_2 + 2*np.pi*(fbar + df/2), 2*np.pi*(gammabar + dgamma/2), demodf1_2, tau)
+    osc2demod2_2 = single_osc_demod_response2(t_2, C2.real, C2.imag, 2*np.pi*w2_2 + 2*np.pi*(fbar - df/2), 2*np.pi*(gammabar - dgamma/2), demodf1_2, tau)
+    
 
     # prep 1, full response from each demod
     model1_1 = osc1demod1_1 + osc2demod1_1 + bkgR1_1 + 1j*bkgI1_1
@@ -540,7 +579,7 @@ def two_prep_two_demod_response(t_1, t_2, L1, L2, K1, K2, phiL1, phiL2, phiK1, p
     # model1 = (np.real(initmodel_1)/scaleR_1) + 1j*(np.imag(initmodel_1)/scaleI_1)
     # model2 = (np.real(initmodel_2)/scaleR_2) + 1j*(np.imag(initmodel_2)/scaleI_2)
     
-    return np.concatenate([model1_1, model1_2, model2_1, model2_2])
+    return np.concatenate([model1_1, model1_2, model2_2, model2_1])
 
 two_prep_two_demod_response_model = lmfit.Model(two_prep_two_demod_response, independent_vars=['t_1', 't_2'])
 
@@ -872,7 +911,7 @@ class fit_all():
         # A1sg, A2sg, phi1sg, phi2sg, B1sg, B2sg, qhi1sg, qhi2sg, *backgrounds_eigenvalues = guess_array
         L1g, L2g, K1g, K2g, phiL1g, phiL2g, phiK1g, phiK2g, phiKdiffg, *backgrounds_eigenvalues = guess_array
 
-        model = two_prep_one_demod_response_model
+        model = two_prep_two_demod_response_model
 
         #set fixed parameters in the model
         model.set_param_hint('w1_1', value = self.w11, vary = False)
@@ -917,7 +956,7 @@ class fit_all():
             model.set_param_hint('fbar', value = fbarg, min = -maxdev + fbarg, max = maxdev + fbarg, vary = True)#200 Hz
             model.set_param_hint('df', value = dfg, min = -maxdev + dfg, max = maxdev + dfg, vary = True)
             model.set_param_hint('gammabar', value = gambarg, min = -maxdev + gambarg, max = maxdev + gambarg, vary = True)
-            model.set_param_hint('gam2', value = dgamg, min = -maxdev + dgamg, max = maxdev + dgamg, vary = True)       
+            model.set_param_hint('dgamma', value = dgamg, min = -maxdev + dgamg, max = maxdev + dgamg, vary = True)       
 
         elif len(backgrounds_eigenvalues) == 12:
             # If we've already got a guess for the background and eigenvalues from a previous fit
@@ -936,13 +975,17 @@ class fit_all():
             model.set_param_hint('fbar', value = fbarg, min = -maxdev + fbarg, max = maxdev + fbarg, vary = True)#200 Hz
             model.set_param_hint('df', value = dfg, min = -maxdev + dfg, max = maxdev + dfg, vary = True)
             model.set_param_hint('gammabar', value = gambarg, min = -maxdev + gambarg, max = maxdev + gambarg, vary = True)
-            model.set_param_hint('gam2', value = dgamg, min = -maxdev + dgamg, max = maxdev + dgamg, vary = True)     
+            model.set_param_hint('dgamma', value = dgamg, min = -maxdev + dgamg, max = maxdev + dgamg, vary = True)     
 
 
         else:
             print(backgrounds_eigenvalues)
             raise ValueError("Guess array is an invalid length")
-        
+        # self.t1 = exp1.time[exp1.iLIAend:-1]-exp1.time[exp1.iLIAstart]
+        # self.t2 = exp2.time[exp2.iLIAend:-1]-exp2.time[exp2.iLIAstart]
+        self.t1 = exp1.time[exp1.iLIAend:-1]-exp1.time[exp1.iloopend]
+        self.t2 = exp2.time[exp2.iLIAend:-1]-exp1.time[exp2.iloopend]
+
         return model
 
     def dofits(self, guesss, maxdev = 200):
@@ -959,19 +1002,19 @@ class fit_all():
         # Get the data into the right format
         # fitdat1 = (np.real(exp1.C2[exp1.iLIAend:-1])/self.scale1s) + 1j*(np.imag(exp1.C2[exp1.iLIAend:-1])/self.scale2s) # data from exp 1, lower frequency (3,3)
         # fitdat2 = (np.real(exp2.C2[exp2.iLIAend:-1])/self.scale3s) + 1j*(np.imag(exp2.C2[exp2.iLIAend:-1])/self.scale4s) # data from exp 2, higher frequency (5,3)
-        fitdat1 = exp1.C2
-        fitdat2 = exp1.C5
-        fitdat3 = exp2.C2
-        fitdat4 = exp2.C5
+        fitdat1 = exp1.C2[exp1.iLIAend:-1]
+        fitdat2 = exp1.C5[exp1.iLIAend:-1]
+        fitdat3 = exp2.C2[exp2.iLIAend:-1]
+        fitdat4 = exp2.C5[exp2.iLIAend:-1]
         fitdat = np.concatenate([fitdat1, fitdat2, fitdat3, fitdat4])
-        t1axis = exp1.time[exp1.iLIAend:-1]-exp1.time[exp1.iLIAstart]
-        t2axis = exp2.time[exp2.iLIAend:-1]-exp2.time[exp2.iLIAstart]
+        t1axis = self.t1
+        t2axis = self.t2
 
         # Fit the data formated above using the perapred model
         params = model.make_params()
         FR = model.fit(fitdat, params, t_1 = t1axis, t_2 = t2axis, max_nfev=1000000)
         
-        return FR 
+        return FR, model
     
     def run_fit_generate_data(self, guesss):
         '''
@@ -988,96 +1031,28 @@ class fit_all():
         exp2 = self.exp2
 
         #do initial fitting
-        FRsi = self.dofits(guesss)
+        FR_initial, _ = self.dofits(guesss)
 
         #unpack simple ringdown
-        A1si = FRsi.params['A1_1'].value
-        A2si = FRsi.params['A2_1'].value
-        phi1si = FRsi.params['phi1_1'].value
-        phi2si = FRsi.params['phi2_1'].value
-        dw1si = FRsi.params['dw1'].value
-        dw2si = FRsi.params['dw2'].value
-        gam1si = FRsi.params['gam1'].value
-        gam2si = FRsi.params['gam2'].value
-        bkgR1si = FRsi.params['bkgR_1'].value
-        bkgI1si = FRsi.params['bkgI_1'].value
 
-        B1si = FRsi.params['A1_2'].value
-        B2si = FRsi.params['A2_2'].value
-        qhi1si = FRsi.params['phi1_2'].value
-        qhi2si = FRsi.params['phi2_2'].value
-        bkgR2si = FRsi.params['bkgR_2'].value
-        bkgI2si = FRsi.params['bkgI_2'].value
-
-        guesssi = [np.abs(A1si), np.abs(A2si), phi1si%(2*np.pi), phi2si%(2*np.pi), np.abs(B1si), np.abs(B2si), qhi1si%(2*np.pi), qhi2si%(2*np.pi),
-                    bkgR1si, bkgI1si, bkgR2si, bkgI2si, dw1si, dw2si, gam1si, gam2si]  
+        guess_1 = unpack_FR(FR_initial)
 
         #do fitting again to reduce fitting failures
-        FRs = self.dofits(guesssi, maxdev = 1000)
-        A1s = FRs.params['A1_1'].value
-        A2s = FRs.params['A2_1'].value
-        phi1s = FRs.params['phi1_1'].value
-        phi2s = FRs.params['phi2_1'].value
-        dw1s = FRs.params['dw1'].value
-        dw2s = FRs.params['dw2'].value
-        gam1s = FRs.params['gam1'].value
-        gam2s = FRs.params['gam2'].value
-        bkgR1s = FRs.params['bkgR_1'].value
-        bkgI1s = FRs.params['bkgI_1'].value
+        self.fit_report, self.modelF = self.dofits(guess_1, maxdev = 1000)
+        self.next_guess = unpack_FR(self.fit_report)
 
-        B1s = FRs.params['A1_2'].value
-        B2s = FRs.params['A2_2'].value
-        qhi1s = FRs.params['phi1_2'].value
-        qhi2s = FRs.params['phi2_2'].value
-        bkgR2s = FRs.params['bkgR_2'].value
-        bkgI2s = FRs.params['bkgI_2'].value
-
-
-
-        #make theory curves
-        if exp1.demod2f < exp2.demod2f:
-            # for experiment 1 (data from file1a)
-            self.exp1_fit_t = np.linspace(exp1.time[exp1.iLIAend], exp1.time[-1], 500)
-            self.exp1_fit_C2 = two_osc_demod_response(self.exp1_fit_t - exp1.time[exp1.iLIAstart], A1s, A2s, phi1s, phi2s, self.w11, self.w21, gam1s, gam2s, 
-                                        dw1s, dw2s, exp1.demod2f, exp1.tauLIA, bkgR1s, bkgI1s, 1, 1)
-            # for experiment 2 (data from file1b)
-            self.exp2_fit_t = np.linspace(exp2.time[exp2.iLIAend], exp2.time[-1], 500)
-            self.exp2_fit_C2 = two_osc_demod_response(self.exp2_fit_t - exp2.time[exp2.iLIAstart], B1s, B2s, qhi1s, qhi2s, self.w12, self.w22, gam1s, gam2s, 
-                                        dw1s, dw2s, exp2.demod2f, exp1.tauLIA, bkgR2s, bkgI2s, 1, 1)
-            
-            self.plotter = Plotter(self.exp1, self.exp2, [self.exp1_fit_t, self.exp1_fit_C2, self.exp2_fit_t, self.exp2_fit_C2])
-
-        elif exp1.demod2f > exp2.demod2f:
-            # for experiment 2 (data from file1b)
-            self.exp1_fit_t = np.linspace(exp2.time[exp2.iLIAend], exp2.time[-1], 500)
-            self.exp1_fit_C2 = two_osc_demod_response(self.exp1_fit_t - exp2.time[exp2.iLIAstart], A1s, A2s, phi1s, phi2s, self.w11, self.w21,  gam1s, gam2s,
-                                        dw1s, dw2s,  exp2.demod2f, exp2.tauLIA, bkgR1s, bkgI1s, 1, 1)
-            # for experiment 1 (data from file1a)
-            self.exp2_fit_t = np.linspace(exp1.time[exp1.iLIAend], exp1.time[-1], 500)
-            self.exp2_fit_C2 = two_osc_demod_response(self.exp2_fit_t - exp1.time[exp1.iLIAstart], B1s, B2s, qhi1s, qhi2s, self.w12, self.w22, gam1s, gam2s, 
-                                        dw1s, dw2s, exp1.demod2f, exp1.tauLIA, bkgR2s, bkgI2s, 1, 1)
-            
-            self.plotter = Plotter(self.exp2, self.exp1, [self.exp1_fit_t, self.exp1_fit_C2, self.exp2_fit_t, self.exp2_fit_C2])
+        # Make theory curves
+        n = 500
+        self.exp1_fit_t = np.linspace(exp1.time[exp1.iLIAend], exp1.time[-1], n) 
+        self.exp2_fit_t = np.linspace(exp2.time[exp2.iLIAend], exp2.time[-1], n)
+        dtemp = self.modelF.eval(self.fit_report.params, t_1 = self.exp1_fit_t - exp1.time[exp1.iloopend], 
+                                                    t_2 = self.exp2_fit_t - exp2.time[exp2.iloopend])
+        fitarray_temp = [self.exp1_fit_t, dtemp[:n], self.exp2_fit_t, dtemp[2*n:3*n]]
+        self.plotter = Plotter(self.exp1, self.exp2, fitarray_temp)
         
-        # ret1 = [self.exp1_fit_t, self.exp1_fit_C2, self.exp2_fit_t, self.exp2_fit_C2]#for plotting Defunct
+        header, values = unpack_FR_return(self.fit_report)
 
-        # ret2 = [FRs]#for saving individual fit results
-        self.fit_report = FRs
-
-        self.return_array = np.array([exp1.demod2f, exp2.demod2f, self.w11 + dw1s, self.w22 + dw2s, gam1s, gam2s , self.bf1, self.bf2, self.eta,
-                np.abs(A1s), np.abs(A2s), phi1s%(2*np.pi), phi2s%(2*np.pi), bkgR1s, bkgI1s, self.scale1s, self.scale2s,
-                np.abs(B1s), np.abs(B2s), qhi1s%(2*np.pi), qhi2s%(2*np.pi), bkgR2s, bkgI2s, self.scale3s, self.scale4s])#for saving collated fit results
-        
-        self.return_array_labels = ['demod2f (Hz)', 'demod5f (Hz)', 'f1 (Hz)', 'f2 (Hz)', 'gamma1 (Hz)', 'gamma2 (Hz)', 'baref1 (Hz)', 'baref2 (Hz)', 'eta (Hz)',
-                                    'A1 (mV)', 'A2 (mV)', 'phi1 (rad)', 'phi2 (rad)', 'bkgR1 (mV)', 'bkgI1 (mV)', 'scale1 (mV)', 'scale2 (mV)',
-                                    'B1 (mV)', 'B2 (mV)', 'qhi1 (rad)', 'qhi2 (rad)', 'bkgR2 (mV)', 'bkgI2 (mV)', 'scale3 (mV)', 'scale4 (mV)']
-
-        self.next_guess = [np.abs(A1s), np.abs(A2s), phi1s%(2*np.pi), phi2s%(2*np.pi), np.abs(B1s), np.abs(B2s), qhi1s%(2*np.pi), qhi2s%(2*np.pi),
-                bkgR1s, bkgI1s,  bkgR2s, bkgI2s, dw1s, dw2s, gam1s, gam2s]#for guesss
-        
-        
-
-        return
+        return header, values
 
 '''
 Plotters
@@ -1089,6 +1064,27 @@ class Plotter:
         self.exp2 = exp2
         self.fitarray = fitarray
         self.exp1_fit_t, self.exp1_fit_C2, self.exp2_fit_t, self.exp2_fit_C2 = fitarray
+
+    def make_theory_curves(self, model = None, FR = None):
+        if model == None or FR == None:
+            raise ValueError("Need to provide either params or fit report")
+        else:
+            n = 500
+            # self.exp1_fit_t = np.linspace(self.exp1.time[self.exp1.iLIAend], self.exp1.time[-1], n) 
+            # self.exp2_fit_t = np.linspace(self.exp2.time[self.exp2.iLIAend], self.exp2.time[-1], n)
+            self.exp1_fit_t = np.linspace(self.exp1.time[self.exp1.iLIAstart], self.exp1.time[-1], n) 
+            self.exp2_fit_t = np.linspace(self.exp2.time[self.exp2.iLIAstart], self.exp2.time[-1], n)
+            dtemp = model.eval(FR.params, t_1 = self.exp1_fit_t - self.exp1.time[self.exp1.iLIAstart],
+             t_2 = self.exp2_fit_t - self.exp2.time[self.exp2.iLIAstart])
+            # dtemp = model.eval(FR.params, t_1 = self.exp1_fit_t - self.exp1.time[self.exp1.iLIAend],
+            #  t_2 = self.exp2_fit_t - self.exp2.time[self.exp2.iLIAend])
+            self.exp1_fit_C2 = dtemp[0:n]
+            self.exp1_fit_C5 = dtemp[n:2*n]
+            self.exp2_fit_C2 = dtemp[2*n:3*n]
+            self.exp2_fit_C5 = dtemp[3*n:4*n]
+            #filler
+        # filler 
+        return
 
     def plot_params(self, ax, fsz, wid, tpad, lpad, y_label = None, x_label = None, title = None):
         ax.xaxis.set_tick_params(which='major', size=5, width=wid, direction='in', labelsize = fsz, pad = tpad)
@@ -1105,7 +1101,8 @@ class Plotter:
             ax.set_title(title, fontsize = fsz) 
         return
 
-    def plot_all(self, plotname, savefolder, show = False, save = True):
+    def plot_driven(self, plotname, savefolder, show = False, save = True):
+        # plots the driven demods
         # start plotting
         fsz = 10
         wid = 0.8
@@ -1199,5 +1196,189 @@ class Plotter:
             plt.savefig(plotname, dpi = 100,bbox_inches='tight') # ALMOST THE ENTIRE RUN TIME IS SPENT SAVING
         if not show:
             plt.close()
+
+
+    def plot_all(self, plotname, savefolder, show = False, save = True):
+        # plots all four demods
+        # start plotting
+        fsz = 10
+        wid = 0.8
+        lwid = 1
+        plwid = 4.5
+        thwid = wid
+        lpad = 6
+        pcol = 'darkorange'
+        fcol = 'maroon'
+        pcol1 = '#03A89E'
+        fcol1 = '#191970'
+        fwid = 1.5
+        LIAcol = '#ADD8E6'
+        loopcol = '#B5B5B5'
+        tpad = 5
+        mpl.rcParams['font.family'] = 'Arial'
+        plt.rcParams['font.size'] = fsz
+        plt.rcParams['axes.linewidth'] = wid
+        mpl.rcParams['axes.formatter.useoffset'] = False
+
+        fig, axs = plt.subplots(ncols=4, nrows=4, figsize=(20,9),facecolor='white',sharex='col',
+                                gridspec_kw=dict({'height_ratios': [1, 1, 1, 1]}, hspace=0.0,wspace = 0.1))
+
+
+        # experiment 1
+
+        # both demods abs simple log  
+        axs[0,0].plot(self.exp1.time - self.exp1.tLIAstart, np.abs(self.exp1.C2), color=pcol, linewidth = plwid)
+        axs[0,0].plot(self.exp1.time - self.exp1.tLIAstart, np.abs(self.exp1.C5), color=pcol1, linewidth = plwid)
+        axs[0,0].plot(self.exp1_fit_t - self.exp1.tLIAstart, np.abs(self.exp1_fit_C2), color=fcol, linewidth = fwid)
+        axs[0,0].plot(self.exp1_fit_t - self.exp1.tLIAstart, np.abs(self.exp1_fit_C5), color=fcol1, linewidth = fwid)
+        axs[0,0].axvspan(0, self.exp1.tLIAend - self.exp1.tLIAstart, facecolor=LIAcol, alpha=0.45, zorder=2.5, label = 'LIA window')
+        axs[0,0].legend(fontsize = fsz, loc = 'best', frameon = True)
+        axs[0,0].set_yscale("log")
+        self.plot_params(axs[0,0], fsz, wid, tpad, lpad, y_label = "Abs[response] (mV)", title = "simple ringdown, drive (3,3)")
+
+        # both demods abs simple linear
+        axs[1,0].plot(self.exp1.time - self.exp1.tLIAstart, np.abs(self.exp1.C2), color=pcol, linewidth = plwid, label = 'demod 2')
+        axs[1,0].plot(self.exp1.time - self.exp1.tLIAstart, np.abs(self.exp1.C5), color=pcol1, linewidth = plwid, label = 'demod 5')
+        axs[1,0].plot(self.exp1_fit_t - self.exp1.tLIAstart, np.abs(self.exp1_fit_C2), color=fcol, linewidth = fwid, label = 'fit d2')
+        axs[1,0].plot(self.exp1_fit_t - self.exp1.tLIAstart, np.abs(self.exp1_fit_C5), color=fcol1, linewidth = fwid, label = 'fit d5')
+        axs[1,0].axvspan(0, self.exp1.tLIAend - self.exp1.tLIAstart, facecolor=LIAcol, alpha=0.45, zorder=2.5)
+        axs[1,0].legend(fontsize = fsz, loc = 'best', frameon = True)
+        self.plot_params(axs[1,0], fsz, wid, tpad, lpad, y_label = "Abs[response] (mV)")
+
+        # both demods real simple
+        axs[2,0].plot(self.exp1.time - self.exp1.tLIAstart, np.real(self.exp1.C2), color=pcol, linewidth = plwid)
+        axs[2,0].plot(self.exp1.time - self.exp1.tLIAstart, np.real(self.exp1.C5), color=pcol1, linewidth = plwid)
+        axs[2,0].plot(self.exp1_fit_t - self.exp1.tLIAstart, np.real(self.exp1_fit_C2), color=fcol, linewidth = fwid)
+        axs[2,0].plot(self.exp1_fit_t - self.exp1.tLIAstart, np.real(self.exp1_fit_C5), color=fcol1, linewidth = fwid)
+        axs[2,0].axvspan(0, self.exp1.tLIAend - self.exp1.tLIAstart, facecolor=LIAcol, alpha=0.45, zorder=2.5)
+        self.plot_params(axs[2,0], fsz, wid, tpad, lpad, y_label = "in-phase response (mV)")
+
+        # both demods imaginary simple
+        axs[3,0].plot(self.exp1.time - self.exp1.tLIAstart, np.imag(self.exp1.C2), color=pcol, linewidth = plwid)
+        axs[3,0].plot(self.exp1.time - self.exp1.tLIAstart, np.imag(self.exp1.C5), color=pcol1, linewidth = plwid)
+        axs[3,0].plot(self.exp1_fit_t - self.exp1.tLIAstart, np.imag(self.exp1_fit_C2), color=fcol, linewidth = fwid)
+        axs[3,0].plot(self.exp1_fit_t - self.exp1.tLIAstart, np.imag(self.exp1_fit_C5), color=fcol1, linewidth = fwid)
+        axs[3,0].axvspan(0, self.exp1.tLIAend - self.exp1.tLIAstart, facecolor=LIAcol, alpha=0.45, zorder=2.5)
+        self.plot_params(axs[3,0], fsz, wid, tpad, lpad, y_label = "quadrature response (mV)", x_label = "time (s)")
+
+        # both demods abs loop log
+        axs[0,1].plot(self.exp1.time[self.exp1.iLIAend:-1] - self.exp1.tLIAstart, np.abs(self.exp1.C2[self.exp1.iLIAend:-1]), color=pcol, linewidth = plwid)
+        axs[0,1].plot(self.exp1.time[self.exp1.iLIAend:-1] - self.exp1.tLIAstart, np.abs(self.exp1.C5[self.exp1.iLIAend:-1]), color=pcol1, linewidth = plwid)
+        axs[0,1].plot(self.exp1_fit_t - self.exp1.tLIAstart, np.abs(self.exp1_fit_C2), color=fcol, linewidth = fwid)
+        axs[0,1].plot(self.exp1_fit_t - self.exp1.tLIAstart, np.abs(self.exp1_fit_C5), color=fcol1, linewidth = fwid)
+        axs[0,1].set_yscale("log")
+        self.plot_params(axs[0,1], fsz, wid, tpad, lpad)
+
+        # both demods abs loop linear
+        axs[1,1].plot(self.exp1.time[self.exp1.iLIAend:-1] - self.exp1.tLIAstart, np.abs(self.exp1.C2[self.exp1.iLIAend:-1]), color=pcol, linewidth = plwid)
+        axs[1,1].plot(self.exp1.time[self.exp1.iLIAend:-1] - self.exp1.tLIAstart, np.abs(self.exp1.C5[self.exp1.iLIAend:-1]), color=pcol1, linewidth = plwid)
+        axs[1,1].plot(self.exp1_fit_t - self.exp1.tLIAstart, np.abs(self.exp1_fit_C2), color=fcol, linewidth = fwid)
+        axs[1,1].plot(self.exp1_fit_t - self.exp1.tLIAstart, np.abs(self.exp1_fit_C5), color=fcol1, linewidth = fwid)
+        self.plot_params(axs[1,1], fsz, wid, tpad, lpad)
+    
+        # both demods real loop
+        axs[2,1].plot(self.exp1.time[self.exp1.iLIAend:-1] - self.exp1.tLIAstart, np.real(self.exp1.C2[self.exp1.iLIAend:-1]), color=pcol, linewidth = plwid)
+        axs[2,1].plot(self.exp1.time[self.exp1.iLIAend:-1] - self.exp1.tLIAstart, np.real(self.exp1.C5[self.exp2.iLIAend:-1]), color=pcol1, linewidth = plwid)
+        axs[2,1].plot(self.exp1_fit_t - self.exp1.tLIAstart, np.real(self.exp1_fit_C2), color=fcol, linewidth = fwid)
+        axs[2,1].plot(self.exp1_fit_t - self.exp1.tLIAstart, np.real(self.exp1_fit_C5), color=fcol1, linewidth = fwid)
+        self.plot_params(axs[2,1], fsz, wid, tpad, lpad)
+
+        # both demods imaginary loop
+        axs[3,1].plot(self.exp1.time[self.exp1.iLIAend:-1] - self.exp1.tLIAstart, np.imag(self.exp1.C2[self.exp1.iLIAend:-1]), color=pcol, linewidth = plwid)
+        axs[3,1].plot(self.exp1.time[self.exp1.iLIAend:-1] - self.exp1.tLIAstart, np.imag(self.exp1.C5[self.exp1.iLIAend:-1]), color=pcol1, linewidth = plwid)
+        axs[3,1].plot(self.exp1_fit_t - self.exp1.tLIAstart, np.imag(self.exp1_fit_C2), color=fcol, linewidth = fwid)
+        axs[3,1].plot(self.exp1_fit_t - self.exp1.tLIAstart, np.imag(self.exp1_fit_C5), color=fcol1, linewidth = fwid)
+        self.plot_params(axs[3,1], fsz, wid, tpad, lpad, x_label = "time (s)")
+
+
+
+
+        # experiment 2
+
+                # both demods abs simple log  
+        axs[0,2].plot(self.exp2.time - self.exp2.tLIAstart, np.abs(self.exp2.C2), color=pcol, linewidth = plwid)
+        axs[0,2].plot(self.exp2.time - self.exp2.tLIAstart, np.abs(self.exp2.C5), color=pcol1, linewidth = plwid)
+        axs[0,2].plot(self.exp2_fit_t - self.exp2.tLIAstart, np.abs(self.exp2_fit_C2), color=fcol, linewidth = fwid)
+        axs[0,2].plot(self.exp2_fit_t - self.exp2.tLIAstart, np.abs(self.exp2_fit_C5), color=fcol1, linewidth = fwid)
+        axs[0,2].axvspan(0, self.exp2.tLIAend - self.exp2.tLIAstart, facecolor=LIAcol, alpha=0.45, zorder=2.5, label = 'LIA window')
+        axs[0,2].legend(fontsize = fsz, loc = 'best', frameon = True)
+        axs[0,2].set_yscale("log")
+        self.plot_params(axs[0,2], fsz, wid, tpad, lpad, y_label = "Abs[response] (mV)", title = "simple ringdown, drive (5,3)")
+
+        # both demods abs simple linear
+        axs[1,2].plot(self.exp2.time - self.exp2.tLIAstart, np.abs(self.exp2.C2), color=pcol, linewidth = plwid, label = 'demod 2')
+        axs[1,2].plot(self.exp2.time - self.exp2.tLIAstart, np.abs(self.exp2.C5), color=pcol1, linewidth = plwid, label = 'demod 5')
+        axs[1,2].plot(self.exp2_fit_t - self.exp2.tLIAstart, np.abs(self.exp2_fit_C2), color=fcol, linewidth = fwid, label = 'fit d2')
+        axs[1,2].plot(self.exp2_fit_t - self.exp2.tLIAstart, np.abs(self.exp2_fit_C5), color=fcol1, linewidth = fwid, label = 'fit d5')
+        axs[1,2].axvspan(0, self.exp2.tLIAend - self.exp2.tLIAstart, facecolor=LIAcol, alpha=0.45, zorder=2.5)
+        axs[1,2].legend(fontsize = fsz, loc = 'best', frameon = True)
+        self.plot_params(axs[1,2], fsz, wid, tpad, lpad, y_label = "Abs[response] (mV)")
+
+        # both demods real simple
+        axs[2,2].plot(self.exp2.time - self.exp2.tLIAstart, np.real(self.exp2.C2), color=pcol, linewidth = plwid)
+        axs[2,2].plot(self.exp2.time - self.exp2.tLIAstart, np.real(self.exp2.C5), color=pcol1, linewidth = plwid)
+        axs[2,2].plot(self.exp2_fit_t - self.exp2.tLIAstart, np.real(self.exp2_fit_C2), color=fcol, linewidth = fwid)
+        axs[2,2].plot(self.exp2_fit_t - self.exp2.tLIAstart, np.real(self.exp2_fit_C5), color=fcol1, linewidth = fwid)
+        axs[2,2].axvspan(0, self.exp2.tLIAend - self.exp2.tLIAstart, facecolor=LIAcol, alpha=0.45, zorder=2.5)
+        self.plot_params(axs[2,2], fsz, wid, tpad, lpad, y_label = "in-phase response (mV)")
+
+        # both demods imaginary simple
+        axs[3,2].plot(self.exp2.time - self.exp2.tLIAstart, np.imag(self.exp2.C2), color=pcol, linewidth = plwid)
+        axs[3,2].plot(self.exp2.time - self.exp2.tLIAstart, np.imag(self.exp2.C5), color=pcol1, linewidth = plwid)
+        axs[3,2].plot(self.exp2_fit_t - self.exp2.tLIAstart, np.imag(self.exp2_fit_C2), color=fcol, linewidth = fwid)
+        axs[3,2].plot(self.exp2_fit_t - self.exp2.tLIAstart, np.imag(self.exp2_fit_C5), color=fcol1, linewidth = fwid)
+        axs[3,2].axvspan(0, self.exp2.tLIAend - self.exp2.tLIAstart, facecolor=LIAcol, alpha=0.45, zorder=2.5)
+        self.plot_params(axs[3,2], fsz, wid, tpad, lpad, y_label = "quadrature response (mV)", x_label = "time (s)")
+
+        # both demods abs loop log
+        axs[0,3].plot(self.exp2.time[self.exp2.iLIAend:-1] - self.exp2.tLIAstart, np.abs(self.exp2.C2[self.exp2.iLIAend:-1]), color=pcol, linewidth = plwid)
+        axs[0,3].plot(self.exp2.time[self.exp2.iLIAend:-1] - self.exp2.tLIAstart, np.abs(self.exp2.C5[self.exp2.iLIAend:-1]), color=pcol1, linewidth = plwid)
+        axs[0,3].plot(self.exp2_fit_t - self.exp2.tLIAstart, np.abs(self.exp2_fit_C2), color=fcol, linewidth = fwid)
+        axs[0,3].plot(self.exp2_fit_t - self.exp2.tLIAstart, np.abs(self.exp2_fit_C5), color=fcol1, linewidth = fwid)
+        axs[0,3].set_yscale("log")
+        self.plot_params(axs[0,3], fsz, wid, tpad, lpad)
+
+        # both demods abs loop linear
+        axs[1,3].plot(self.exp2.time[self.exp2.iLIAend:-1] - self.exp2.tLIAstart, np.abs(self.exp2.C2[self.exp2.iLIAend:-1]), color=pcol, linewidth = plwid)
+        axs[1,3].plot(self.exp2.time[self.exp2.iLIAend:-1] - self.exp2.tLIAstart, np.abs(self.exp2.C5[self.exp2.iLIAend:-1]), color=pcol1, linewidth = plwid)
+        axs[1,3].plot(self.exp2_fit_t - self.exp2.tLIAstart, np.abs(self.exp2_fit_C2), color=fcol, linewidth = fwid)
+        axs[1,3].plot(self.exp2_fit_t - self.exp2.tLIAstart, np.abs(self.exp2_fit_C5), color=fcol1, linewidth = fwid)
+        self.plot_params(axs[1,3], fsz, wid, tpad, lpad)
+    
+        # both demods real loop
+        axs[2,3].plot(self.exp2.time[self.exp2.iLIAend:-1] - self.exp2.tLIAstart, np.real(self.exp2.C2[self.exp2.iLIAend:-1]), color=pcol, linewidth = plwid)
+        axs[2,3].plot(self.exp2.time[self.exp2.iLIAend:-1] - self.exp2.tLIAstart, np.real(self.exp2.C5[self.exp2.iLIAend:-1]), color=pcol1, linewidth = plwid)
+        axs[2,3].plot(self.exp2_fit_t - self.exp2.tLIAstart, np.real(self.exp2_fit_C2), color=fcol, linewidth = fwid)
+        axs[2,3].plot(self.exp2_fit_t - self.exp2.tLIAstart, np.real(self.exp2_fit_C5), color=fcol1, linewidth = fwid)
+        self.plot_params(axs[2,3], fsz, wid, tpad, lpad)
+
+        # both demods imaginary loop
+        axs[3,3].plot(self.exp2.time[self.exp2.iLIAend:-1] - self.exp2.tLIAstart, np.imag(self.exp2.C2[self.exp2.iLIAend:-1]), color=pcol, linewidth = plwid)
+        axs[3,3].plot(self.exp2.time[self.exp2.iLIAend:-1] - self.exp2.tLIAstart, np.imag(self.exp2.C5[self.exp2.iLIAend:-1]), color=pcol1, linewidth = plwid)
+        axs[3,3].plot(self.exp2_fit_t - self.exp2.tLIAstart, np.imag(self.exp2_fit_C2), color=fcol, linewidth = fwid)
+        axs[3,3].plot(self.exp2_fit_t - self.exp2.tLIAstart, np.imag(self.exp2_fit_C5), color=fcol1, linewidth = fwid)
+        self.plot_params(axs[3,3], fsz, wid, tpad, lpad, x_label = "time (s)")
+
+
+
+
+
+        if save:
+            plotname, _ = file_handling.make_plotfilename(plotname, savefolder)
+            plt.savefig(plotname, dpi = 100,bbox_inches='tight') # ALMOST THE ENTIRE RUN TIME IS SPENT SAVING
+        if not show:
+            plt.close()
+
+
+
+
+
+
+
+
+
+
+
+
 
 
